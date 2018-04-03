@@ -5,7 +5,7 @@ import latestTime from './helpers/latestTime';
 import EVMRevert from './helpers/EVMRevert';
 
 const SimpleToken = artifacts.require('./SimpleToken.sol');
-const WhitelistedTimedCappedCrowdsale = artifacts.require("./WhitelistedTimedCappedCrowdsale.sol");
+const PreSaleWithCapCrowdsale = artifacts.require('./PreSaleWithCapCrowdsale.sol');
 
 const BigNumber = web3.BigNumber;
 
@@ -14,7 +14,7 @@ require('chai')
     .use(require('chai-bignumber')(BigNumber))
     .should();
 
-contract('WhitelistedTimedCappedCrowdsale', function ([owner, wallet, investor]) {
+contract('PreSaleWithCapCrowdsale', function ([owner, wallet, investor]) {
 
     const RATE = new BigNumber(1);
     const CAP = ether(2);
@@ -30,7 +30,7 @@ contract('WhitelistedTimedCappedCrowdsale', function ([owner, wallet, investor])
 	this.afterClosingTime = this.closingTime + duration.seconds(1);
 
 	this.token = await SimpleToken.new({ from: owner });
-	this.crowdsale = await WhitelistedTimedCappedCrowdsale.new(
+	this.crowdsale = await PreSaleWithCapCrowdsale.new(
 	    RATE, wallet, this.token.address, this.openingTime, this.closingTime, CAP
 	);
 	const totalSupply = await this.token.totalSupply();
@@ -58,17 +58,31 @@ contract('WhitelistedTimedCappedCrowdsale', function ([owner, wallet, investor])
 	await this.crowdsale.buyTokens(investor, { from: investor, value: ether(1) }).should.be.rejectedWith(EVMRevert);
     });
 
-    it('should not accept whitelisted payments before start', async function () {
+    it('should accept whitelisted payments before start', async function () {
+	const investmentAmount = ether(1);
+	const expectedTokenAmount = RATE.mul(investmentAmount);
+	
 	await this.crowdsale.addToWhitelist(investor);
-	await this.crowdsale.buyTokens(investor, { from: investor, value: ether(1) }).should.be.rejectedWith(EVMRevert);
+	await this.crowdsale.buyTokens(investor, { value: investmentAmount, from: investor }).should.be.fulfilled;
+
+	(await this.token.balanceOf(investor)).should.be.bignumber.equal(expectedTokenAmount);
     });
 
-    it('should not accept non-whitelisted payments during the sale', async function () {
+    it('should not accept whitelisted payments over cap before start', async function () {
+	await this.crowdsale.addToWhitelist(investor);	
+	await this.crowdsale.buyTokens(investor, { value: CAP, from: investor }).should.be.fulfilled;
+	await this.crowdsale.buyTokens(investor, { from: investor, value: ether(1) }).should.be.rejectedWith(EVMRevert);
+    });    
+
+    it('should accept non-whitelisted payments during the sale', async function () {
 	const investmentAmount = ether(1);
 	const expectedTokenAmount = RATE.mul(investmentAmount);
 
 	await increaseTimeTo(this.openingTime);
-	await this.crowdsale.buyTokens(investor, { from: investor, value: ether(1) }).should.be.rejectedWith(EVMRevert);	
+
+	await this.crowdsale.buyTokens(investor, { value: investmentAmount, from: investor }).should.be.fulfilled;
+
+	(await this.token.balanceOf(investor)).should.be.bignumber.equal(expectedTokenAmount);
     });
 
     it('should accept whitelisted payments during the sale', async function () {
@@ -83,7 +97,7 @@ contract('WhitelistedTimedCappedCrowdsale', function ([owner, wallet, investor])
 	(await this.token.balanceOf(investor)).should.be.bignumber.equal(expectedTokenAmount);
     });
 
-    it('should not accept whitelisted payments over cap', async function () {
+    it('should not accept whitelisted payments over cap during the sale', async function () {
 	await this.crowdsale.addToWhitelist(investor);	
 	await increaseTimeTo(this.openingTime);
 	await this.crowdsale.buyTokens(investor, { value: CAP, from: investor }).should.be.fulfilled;
@@ -96,8 +110,8 @@ contract('WhitelistedTimedCappedCrowdsale', function ([owner, wallet, investor])
     });
 
     it('should not accept whitelisted payments after end', async function () {
+	await this.crowdsale.addToWhitelist(investor);	
 	await increaseTimeTo(this.afterClosingTime);
-	await this.crowdsale.addToWhitelist(investor);
 	await this.crowdsale.buyTokens(investor, { from: investor, value: ether(1) }).should.be.rejectedWith(EVMRevert);
     });
 
